@@ -1,0 +1,23 @@
+#line 1 "C:\\Users\\49045\\OneDrive - KOBArT vzw\\ALLES\\25-26\\IC\\Gip\\GIP_arduino\\.vscode\\arduino.json"
+{
+  "port": "COM3",
+  "configuration": "",
+  "output": "build",
+  "board": "arduino:avr:uno",
+  "programmer": "",
+  "useProgrammer": false,
+  "optimize_for_debug": false,
+  "configurationRequired": false,
+  "compile_profile": "",
+  "monitorPortSettings": {
+    "settings": {
+      "port": "COM3",
+      "baudRate": 9600,
+      "lineEnding": "\r\n",
+      "dataBits": 8,
+      "parity": "none",
+      "stopBits": "one"
+    },
+    "profile_name": ""
+  }
+}

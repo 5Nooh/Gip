@@ -1,0 +1,12 @@
+#line 1 "C:\\Users\\49045\\OneDrive - KOBArT vzw\\ALLES\\25-26\\IC\\Gip\\GIP_arduino\\.vscode\\settings.json"
+{
+    "python.testing.unittestArgs": [
+        "-v",
+        "-s",
+        ".",
+        "-p",
+        "*test.py"
+    ],
+    "python.testing.pytestEnabled": false,
+    "python.testing.unittestEnabled": true
+}
