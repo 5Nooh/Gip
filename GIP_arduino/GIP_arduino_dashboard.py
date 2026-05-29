@@ -1,3 +1,10 @@
+"""
+Slaaptracker GIP
+Nooh Malkaoui
+Realtime ademhalingsanalyse met Arduino en PyQt6
+
+"""
+
 #BIBLIOTHEKEN IMPORTEREN
 import sys, serial, time
 import numpy as np
@@ -57,7 +64,9 @@ def analyse(bpms):
     else:
         trend = "Ademhaling stabiel"
 
-    score = max(0, 100 - (sd * 15))
+    piek_afwijking = abs(gem - 14)
+    score = 100 - (sd * 12) - (piek_afwijking * 2)
+    score = max(0, min(100, score))
 
     return {
         "gem": gem,
@@ -76,20 +85,53 @@ class Dashboard(QMainWindow):
     def __init__(self):
         super().__init__()
 
+        self.metend = False
+        self.start_time = None
+        self.stop_time = None
+
         self.setWindowTitle("Nooh's Slaaptracker")
         self.setGeometry(200,100,1200,700)
         self.setStyleSheet("QMainWindow{background:#0f0f1a;} QLabel{color:#c0c8e0;}")
 
         self.bpms, self.tijden, self.waardes = [], [], []
+        self.bpms_all = []
 
         self.init_ui()
 
-        self.ser = serial.Serial(PORT, BAUD, timeout=0)
+        try:
+            self.ser = serial.Serial(PORT, BAUD, timeout=0)
+        except:
+            self.status_label.setText("Geen Arduino verbinding")
+            self.ser = None
         time.sleep(2)
 
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_all)
-        self.timer.start(50)   # 20 FPS smooth
+        self.timer.start(50)   
+
+    def start_meting(self):
+        self.metend = True
+        self.start_time = time.time()
+        self.status_label.setText("🟢BEZIG")
+
+    def stop_meting(self):
+        self.metend = False
+        self.stop_time = time.time()  # bijhouden!
+        self.status_label.setText("🔴GESTOPT")
+
+    def reset_meting(self):
+        self.bpms.clear()
+        self.bpms_all.clear()
+        self.tijden.clear()
+        self.waardes.clear()
+        self.line.set_data([], [])
+        self.canvas.draw_idle()
+        self.lbl_report.hide()
+        self.lbl_score.setText("—")
+        self.lbl_stats.setText("Data gereset.")
+        self.status_label.setText("🟡KLAAR")
+        self.start_time = None
+        self.stop_time = None
 
     #Gebruikersinterface
     def toggle_report(self):
@@ -104,7 +146,6 @@ class Dashboard(QMainWindow):
             self.lbl_report.show()
             return
 
-        #Uitleg/interpretatie voor gebruiker
         uitleg = ""
 
         if a['stabiliteit'] == "Zeer stabiel":
@@ -112,24 +153,38 @@ class Dashboard(QMainWindow):
         elif a['stabiliteit'] == "Normaal":
             uitleg += "Je ademhaling vertoont normale variaties, wat typisch is tijdens slaap.\n\n"
         else:
-            uitleg += "Je ademhaling is vrij onrustig. Dit kan wijzen op beweging, dromen of lichte slaap.\n\n"
+            uitleg += "Je ademhaling is vrij onrustig. Dit kan wijzen op beweging of lichte slaap.\n\n"
 
         if "Diepe slaap" in a['fase']:
-            uitleg += "Je bevond je waarschijnlijk in een diepe slaapfase, waarbij het lichaam maximaal herstelt.\n\n"
+            uitleg += "Je bevond je waarschijnlijk in een diepe slaapfase.\n\n"
         elif "Lichte slaap" in a['fase']:
             uitleg += "Je zat waarschijnlijk in een lichtere slaapfase.\n\n"
         else:
-            uitleg += "Je ademhaling wijst op een actievere of onrustige fase.\n\n"
+            uitleg += "Je ademhaling wijst op een actievere fase.\n\n"
 
-        uitleg += f"Gemiddelde ademhaling: {a['gem']:.1f} per minuut.\n"
-        uitleg += f"Algemene stabiliteitsscore: {a['score']:.0f}/100."
+        #Meetduur correct berekenen
+        duur = 0
+
+        einde = self.stop_time if self.stop_time else time.time()
+        duur = int(einde - self.start_time) if self.start_time else 0
+
+        minuten = duur // 60
+        seconden = duur % 60
+
+        uitleg += f"Gemiddelde ademhaling: {a['gem']:.1f} per minuut\n"
+        uitleg += f"Minimum BPM: {min(self.bpms_all):.1f}\n"
+        uitleg += f"Maximum BPM: {max(self.bpms_all):.1f}\n"
+        uitleg += f"Variatie (SD): {a['sd']:.2f}\n"
+        uitleg += f"Stabiliteitsscore: {a['score']:.0f} / 100\n"
+        uitleg += f"Totale meetduur: {minuten} min {seconden} sec\n"
+        uitleg += f"Aantal geldige metingen: {len(self.bpms_all)}"
 
         self.lbl_report.setText(uitleg)
         self.lbl_report.show()
 
     def init_ui(self):
         self.bpms_all = []
-
+       
         main = QWidget()
         self.setCentralWidget(main)
         layout = QHBoxLayout(main)
@@ -148,6 +203,10 @@ class Dashboard(QMainWindow):
         self.ax.tick_params(colors="#888")
         self.ax.set_title("Realtime Ademhalingssignaal", color="#aaaacc")
 
+        self.ax.set_xlabel("Tijd (s)", color="#888")
+        self.ax.set_ylabel("Amplitude (sensorwaarde)", color="#888")
+        self.ax.grid(True, alpha=0.2)
+
         self.line, = self.ax.plot([], [], color="#00ff99", linewidth=1.5)
 
         layout.addWidget(self.canvas, 3)
@@ -156,6 +215,24 @@ class Dashboard(QMainWindow):
         panel = QWidget()
         panel.setStyleSheet("background:#13131f;border-radius:12px;")
         p = QVBoxLayout(panel)
+        p.setContentsMargins(20,24,20,20)
+        p.setSpacing(10)
+
+        #START/STOP/RESET knoppen
+        self.btn_start = QPushButton("Start meting")
+        self.btn_stop = QPushButton("Stop meting")
+        self.btn_reset = QPushButton("Reset")
+
+        for b in [self.btn_start, self.btn_stop, self.btn_reset]:
+            b.setStyleSheet(
+                "QPushButton{background:#1f6feb;color:white;"
+                "font-weight:bold;padding:8px;border-radius:6px}"
+                "QPushButton:hover{background:#388bfd}")
+            p.addWidget(b)
+
+        self.btn_start.clicked.connect(self.start_meting)
+        self.btn_stop.clicked.connect(self.stop_meting)
+        self.btn_reset.clicked.connect(self.reset_meting)
         p.setContentsMargins(20,24,20,20)
         p.setSpacing(10)
 
@@ -188,6 +265,12 @@ class Dashboard(QMainWindow):
             "background:#0e1a28;border-radius:8px;padding:10px;")
         p.addWidget(self.lbl_stab)
 
+        self.status_label = QLabel("🟡KLAAR")
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setStyleSheet(
+            "font-size:14px;font-weight:bold;color:#ffaa00;"
+        )
+        p.addWidget(self.status_label)
 
         p.addStretch()
 
@@ -211,7 +294,8 @@ class Dashboard(QMainWindow):
 
     #CONSTANTE UPDATES MET LOOP 
     def update_all(self):
-
+        if not self.metend or not self.ser:
+            return
         #uitlezing
         while self.ser.in_waiting:
             line = self.ser.readline().decode(errors="ignore").strip()
@@ -226,8 +310,8 @@ class Dashboard(QMainWindow):
             self.tijden.append(t/1000)
             self.waardes.append(w)
             if 4 <= b <= 45:
-                self.bpms.append(b)       # voor live (60 sec)
-                self.bpms_all.append(b)   # voor volledige analyse
+                self.bpms.append(b)       #voor live (60 sec)
+                self.bpms_all.append(b)   #voor volledige analyse
 
         while self.tijden and self.tijden[-1] - self.tijden[0] > 60:
             self.tijden.pop(0)
@@ -235,18 +319,33 @@ class Dashboard(QMainWindow):
             if self.bpms:
                 self.bpms.pop(0)
 
-        #Poging tot vloeiendheid grafiek
+        #Grafiek updaten
         if len(self.waardes) > 20:
-            window = 15
-            smooth = np.convolve(self.waardes,
-                                 np.ones(window)/window,
-                                 mode='valid')
+            window = 8
+            smooth = np.convolve(
+                self.waardes,
+                np.ones(window) / window,
+                mode='valid'
+            )
+
+            #Baseline correction
+            smooth = smooth - np.mean(smooth)
+
+            #Kleine ruis verwijderen
+            drempel = 1
+
+            smooth = np.where(
+                abs(smooth) < drempel,
+                0,
+                smooth
+)
             x_vals = self.tijden[-len(smooth):]
 
             self.line.set_data(x_vals, smooth)
-            self.ax.set_xlim(max(0, x_vals[-1]-20), x_vals[-1])
+            self.ax.set_xlim(max(0, x_vals[-1] - 20), x_vals[-1])
             self.ax.relim()
             self.ax.autoscale_view(scaley=True)
+            #self.ax.set_ylim(-50, 50)
             self.canvas.draw_idle()
 
         #Live analyse tijdens meting
